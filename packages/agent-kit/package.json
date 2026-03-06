@@ -1,5 +1,5 @@
 {
-  "name": "@inngest/agent-kit",
+  "name": "@cdmbase/agent-kit",
   "version": "0.13.2",
   "description": "AgentKit is a framework for creating and orchestrating AI agents and AI workflows",
   "main": "dist/index.js",
