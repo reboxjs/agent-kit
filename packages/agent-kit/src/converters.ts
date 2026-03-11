@@ -3,7 +3,7 @@
  *
  * @module
  */
-import { jsonSchema, type ModelMessage, type Tool, type ToolResultPart } from "ai";
+import { jsonSchema, type JSONValue, type ModelMessage, type Tool, type ToolResultPart } from "ai";
 import { z } from "zod";
 import {
   type Message,
@@ -51,7 +51,7 @@ export function messagesToCoreMessages(messages: Message[]): ModelMessage[] {
               type: "tool-result" as const,
               toolCallId: msg.tool.id,
               toolName: msg.tool.name,
-              output: { type: "json" as const, value: msg.content as ToolResultPart["output"]["value"] },
+              output: { type: "json" as const, value: msg.content as JSONValue },
             } satisfies ToolResultPart,
           ],
         });

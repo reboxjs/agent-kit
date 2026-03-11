@@ -47,7 +47,7 @@
     }
   },
   "dependencies": {
-    "ai": "^5.0.0",
+    "ai": "^6.0.116",
     "@modelcontextprotocol/sdk": "^1.11.2",
     "eventsource": "^3.0.2",
     "express": "^4.21.1",
@@ -59,8 +59,8 @@
   },
   "packageManager": "pnpm@9.14.2",
   "devDependencies": {
-    "@ai-sdk/openai": "^1.0.0",
-    "@ai-sdk/provider": "^1.0.0",
+    "@ai-sdk/openai": "^3.0.41",
+    "@ai-sdk/provider": "^3.0.8",
     "@types/express": "^5.0.0",
     "@types/node": "^22.9.1",
     "@types/xxhashjs": "^0.2.4",
