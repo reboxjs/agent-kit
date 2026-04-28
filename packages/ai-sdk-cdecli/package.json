@@ -1,0 +1,57 @@
+{
+  "name": "@cdmbase/ai-sdk-cdecli",
+  "version": "0.1.0",
+  "description": "Vercel AI SDK provider that wraps cdecli interact-agent serve as a LanguageModelV2",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "build": "tsc --noEmit && tsup",
+    "lint": "eslint .",
+    "type-check": "tsc --noEmit"
+  },
+  "files": [
+    "dist"
+  ],
+  "homepage": "https://github.com/CDEBase/aicode-stack",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CDEBase/aicode-stack.git"
+  },
+  "keywords": [
+    "ai",
+    "ai-sdk",
+    "cdecli",
+    "yantra",
+    "agent",
+    "agent-kit",
+    "language-model",
+    "language-model-v2"
+  ],
+  "license": "Apache-2.0",
+  "typings": "dist/index.d.ts",
+  "publishConfig": {
+    "access": "public"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "dependencies": {
+    "@ai-sdk/provider": "^2.0.1"
+  },
+  "peerDependencies": {
+    "ai": ">=5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.1",
+    "ai": "^5.0.151",
+    "tsup": "^8.3.6",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8"
+  }
+}
