@@ -42,15 +42,23 @@ export interface CdecliModelConfig {
 /**
  * Operating mode for the provider.
  *
- * - `"server"` (default): cdecli runs everything (system prompt, tools,
+ * - `"server"`: cdecli runs everything (system prompt, tools,
  *   connectors). Tool definitions sent by ai-sdk are ignored — the provider
  *   emits a `unsupported-setting` warning when tools are present.
  *
  * Mode `"client"` (forward tool calls back to the caller) is reserved for
  * a future cdecli `/v1/agent/chat` extension that emits structured
  * `tool_call` SSE events and accepts `tool_result` follow-ups.
+ * - "local" (default): tool_call events are mapped into AI SDK tool-call
+ *   content so agent-kit can execute locally registered tools.
  */
-type ToolMode = "server";
+type ToolMode = "server" | "local";
+
+interface MappedToolCall {
+  toolCallId: string;
+  toolName: string;
+  input: Record<string, unknown>;
+}
 
 interface InternalConfig extends CdecliModelConfig {
   modelId: string;
@@ -186,9 +194,9 @@ function buildHeaders(cfg: InternalConfig, accept: string): Record<string, strin
   };
 }
 
-function warningsFor(options: LanguageModelV2CallOptions): LanguageModelV2CallWarning[] {
+function warningsFor(options: LanguageModelV2CallOptions, toolMode: ToolMode): LanguageModelV2CallWarning[] {
   const warnings: LanguageModelV2CallWarning[] = [];
-  if (options.tools && options.tools.length > 0) {
+  if (toolMode === "server" && options.tools && options.tools.length > 0) {
     warnings.push({
       type: "other",
       message:
@@ -208,6 +216,32 @@ function warningsFor(options: LanguageModelV2CallOptions): LanguageModelV2CallWa
 
 function generateSessionId(): string {
   return `aksdk-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function sanitizeDetail(detail: string): string {
+  // Strip leading emoji/symbol prefixes emitted by cdecli status logs.
+  return detail.replace(/^[^a-zA-Z0-9_./-]+\s*/u, "").trim();
+}
+
+function mapToolCall(eventData: unknown, index: number): MappedToolCall | null {
+  const name = getString(eventData, "name");
+  if (!name) return null;
+  const detail = getString(eventData, "detail") ?? "";
+  const cleanedDetail = sanitizeDetail(detail);
+
+  if (name === "bash_exec") {
+    return {
+      toolCallId: `cdecli-terminal-${index}`,
+      toolName: "terminal",
+      input: { command: cleanedDetail || detail },
+    };
+  }
+
+  return {
+    toolCallId: `cdecli-${name}-${index}`,
+    toolName: name,
+    input: detail ? { detail: cleanedDetail || detail } : {},
+  };
 }
 
 /**
@@ -230,7 +264,7 @@ export class CdecliLanguageModel implements LanguageModelV2 {
     this.#config = {
       ...config,
       modelId,
-      toolMode: config.toolMode ?? "server",
+      toolMode: config.toolMode ?? "local",
     };
   }
 
@@ -243,6 +277,10 @@ export class CdecliLanguageModel implements LanguageModelV2 {
   async _doGenerate(
     options: LanguageModelV2CallOptions,
   ): Promise<Awaited<ReturnType<LanguageModelV2["doGenerate"]>>> {
+    if (this.#config.toolMode === "local") {
+      return this._doGenerateFromStream(options);
+    }
+
     const fetchImpl = this.#config.fetch ?? fetch;
     const body = buildBody(options, this.#config, false);
     const url = `${this.#config.endpoint.replace(/\/$/, "")}/v1/agent/chat`;
@@ -270,10 +308,85 @@ export class CdecliLanguageModel implements LanguageModelV2 {
         outputTokens: undefined,
         totalTokens: undefined,
       },
-      warnings: warningsFor(options),
+      warnings: warningsFor(options, this.#config.toolMode),
       providerMetadata: json.session_id
         ? { cdecli: { sessionId: json.session_id } }
         : undefined,
+      request: { body },
+      response: { headers: headersToRecord(res.headers) },
+    };
+  }
+
+  async _doGenerateFromStream(
+    options: LanguageModelV2CallOptions,
+  ): Promise<Awaited<ReturnType<LanguageModelV2["doGenerate"]>>> {
+    const fetchImpl = this.#config.fetch ?? fetch;
+    const body = buildBody(options, this.#config, true);
+    const url = `${this.#config.endpoint.replace(/\/$/, "")}/v1/agent/chat`;
+    const res = await fetchImpl(url, {
+      method: "POST",
+      headers: buildHeaders(this.#config, "text/event-stream"),
+      body: JSON.stringify(body),
+      signal: options.abortSignal,
+    });
+    if (!res.ok) {
+      const errText = await res.text().catch(() => res.statusText);
+      throw new Error(`cdecli /v1/agent/chat failed: ${res.status} ${errText}`);
+    }
+
+    let text = "";
+    let sessionId: string | undefined;
+    const toolCalls: MappedToolCall[] = [];
+    let toolIndex = 0;
+
+    for await (const evt of iterateSse(res)) {
+      switch (evt.event) {
+        case "session": {
+          const sid = getString(evt.data, "session_id");
+          if (sid) sessionId = sid;
+          break;
+        }
+        case "delta":
+        case "output": {
+          const chunk = getString(evt.data, "text");
+          if (chunk) text += chunk;
+          break;
+        }
+        case "tool_call": {
+          const mapped = mapToolCall(evt.data, ++toolIndex);
+          if (mapped) toolCalls.push(mapped);
+          break;
+        }
+        case "error": {
+          const message = getString(evt.data, "error") ?? "cdecli stream error";
+          throw new Error(message);
+        }
+      }
+    }
+
+    const content: LanguageModelV2Content[] = [];
+    if (text) {
+      content.push({ type: "text", text });
+    }
+    for (const tc of toolCalls) {
+      content.push({
+        type: "tool-call",
+        toolCallId: tc.toolCallId,
+        toolName: tc.toolName,
+        input: JSON.stringify(tc.input),
+      });
+    }
+
+    return {
+      content,
+      finishReason: toolCalls.length > 0 ? "tool-calls" : "stop",
+      usage: {
+        inputTokens: undefined,
+        outputTokens: undefined,
+        totalTokens: undefined,
+      },
+      warnings: warningsFor(options, this.#config.toolMode),
+      providerMetadata: sessionId ? { cdecli: { sessionId } } : undefined,
       request: { body },
       response: { headers: headersToRecord(res.headers) },
     };
@@ -302,7 +415,7 @@ export class CdecliLanguageModel implements LanguageModelV2 {
       throw new Error(`cdecli /v1/agent/chat failed: ${res.status} ${errText}`);
     }
 
-    const warnings = warningsFor(options);
+    const warnings = warningsFor(options, this.#config.toolMode);
     const textId = "txt-0";
     let textStarted = false;
     let aggregated = "";

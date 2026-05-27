@@ -81,6 +81,7 @@ describe("CdecliLanguageModel", () => {
       token: "abc",
       skill: "support",
       session: "fixed-session",
+      toolMode: "server",
       fetch: fakeFetch,
     });
 
@@ -105,7 +106,7 @@ describe("CdecliLanguageModel", () => {
         status: 200,
         headers: { "content-type": "application/json" },
       });
-    const model = cdecli("m", { endpoint: "http://x", fetch: fakeFetch });
+    const model = cdecli("m", { endpoint: "http://x", fetch: fakeFetch, toolMode: "server" });
     const result = await model.doGenerate(
       makeOptions({
         tools: [
@@ -118,6 +119,36 @@ describe("CdecliLanguageModel", () => {
       }),
     );
     expect(result.warnings.some((w) => w.type === "other")).toBe(true);
+  });
+
+  it("doGenerate local mode maps tool_call events to local-executable tool calls", async () => {
+    const sse = [
+      "event: session\ndata: {\"session_id\":\"s-local\"}",
+      "event: tool_call\ndata: {\"name\":\"bash_exec\",\"detail\":\"⚡ npm install --yes\"}",
+      "event: tool_call\ndata: {\"name\":\"createOrUpdateFiles\",\"detail\":\"createOrUpdateFiles\"}",
+      "event: delta\ndata: {\"text\":\"done\"}",
+      "event: done\ndata: {}",
+    ].join("\n\n") + "\n\n";
+
+    const fakeFetch: typeof fetch = async () =>
+      new Response(sse, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+
+    const model = cdecli("m", { endpoint: "http://x", fetch: fakeFetch, toolMode: "local" });
+    const result = await model.doGenerate(makeOptions());
+
+    expect(result.finishReason).toBe("tool-calls");
+    expect(result.providerMetadata?.cdecli?.sessionId).toBe("s-local");
+
+    const calls = result.content.filter((p) => p.type === "tool-call") as Array<
+      Extract<(typeof result.content)[number], { type: "tool-call" }>
+    >;
+
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toMatchObject({ toolName: "terminal", input: JSON.stringify({ command: "npm install --yes" }) });
+    expect(calls[1]).toMatchObject({ toolName: "createOrUpdateFiles" });
   });
 
   it("doStream parses delta + done SSE events into text-delta parts", async () => {
