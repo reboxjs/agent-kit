@@ -46,6 +46,7 @@ export class AgenticModel {
           toolCallId: tc.toolCallId,
           toolName: tc.toolName,
           args: tc.input as Record<string, unknown>,
+          providerExecuted: (tc as any).providerExecuted,
         })),
         finishReason: result.finishReason,
       };

@@ -72,6 +72,8 @@ export interface SerializableResult {
     toolCallId: string;
     toolName: string;
     args: unknown;
+    /** True when the tool was already executed by the provider (e.g. cdecli server-side tools). */
+    providerExecuted?: boolean;
   }>;
   finishReason: string;
 }
@@ -82,7 +84,12 @@ export interface SerializableResult {
 export function resultToMessages(result: SerializableResult): Message[] {
   const messages: Message[] = [];
 
-  const hasToolCalls = result.toolCalls && result.toolCalls.length > 0;
+  // Provider-executed tool calls (e.g. cdecli server-side tools) must not be
+  // passed to invokeTools — they were already run by the provider.
+  const agentToolCalls = result.toolCalls
+    ? result.toolCalls.filter((tc) => !tc.providerExecuted)
+    : [];
+  const hasToolCalls = agentToolCalls.length > 0;
 
   // Add text message if present
   if (result.text && result.text.trim() !== "") {
@@ -95,13 +102,13 @@ export function resultToMessages(result: SerializableResult): Message[] {
     messages.push(msg);
   }
 
-  // Add tool call message if present
+  // Add tool call message if present (only for agent-side tools)
   if (hasToolCalls) {
     const msg: ToolCallMessage = {
       type: "tool_call",
       role: "assistant",
       stop_reason: "tool",
-      tools: result.toolCalls.map(
+      tools: agentToolCalls.map(
         (tc): ToolMessage => ({
           type: "tool",
           id: tc.toolCallId,
