@@ -359,7 +359,7 @@ export class Agent<T extends StateData> {
         if (standaloneStreamingContext) {
           result.id = standaloneStreamingContext.messageId;
         }
-        history = [...inference.output];
+        history = [...inference.output, ...inference.toolCalls];
         iter++;
       } while (hasMoreActions && iter < maxIter);
 
