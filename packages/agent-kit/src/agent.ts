@@ -586,9 +586,27 @@ export class Agent<T extends StateData> {
       for (const tool of msg.tools) {
         const found = this.tools.get(tool.name);
         if (!found) {
-          throw new Error(
-            `Inference requested a non-existent tool: ${tool.name}`
+          const missingToolError = errors.serializeError(
+            new Error(`Inference requested a non-existent tool: ${tool.name}`)
           );
+
+          output.push({
+            role: "tool_result",
+            type: "tool_result",
+            tool: {
+              type: "tool",
+              id: tool.id,
+              name: tool.name,
+              input:
+                ((tool.input as { arguments?: Record<string, unknown> })
+                  ?.arguments as Record<string, unknown>) ??
+                ((tool.input as Record<string, unknown>) ?? {}),
+            },
+            content: { error: missingToolError },
+            stop_reason: "tool",
+          });
+
+          continue;
         }
 
         // Stream tool arguments if context available

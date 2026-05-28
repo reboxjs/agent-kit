@@ -59,6 +59,27 @@ describe("Agent standalone run", () => {
     await expect(agent.run("Hi")).rejects.toThrow("No model provided");
   });
 
+  it("returns a tool_result error when inference requests an unknown tool", async () => {
+    const model = createMockModel({
+      toolCalls: [{ toolCallId: "c-unknown", toolName: "manage_todo_list", args: {} }],
+    });
+
+    const agent = createAgent({
+      name: "UnknownToolAgent",
+      system: "Test",
+      model,
+      tools: [],
+    });
+
+    const result = await agent.run("update plan");
+
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.toolCalls[0]!.tool.name).toBe("manage_todo_list");
+    expect(result.toolCalls[0]!.content).toMatchObject({
+      error: { message: "Inference requested a non-existent tool: manage_todo_list" },
+    });
+  });
+
   it("runs with empty input (system prompt only)", async () => {
     const model = createMockModel({ text: "System-only response" });
     const agent = createAgent({
